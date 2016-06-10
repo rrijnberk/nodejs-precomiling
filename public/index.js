@@ -7,9 +7,10 @@
 		url = require("url"),
 		filesys = require("fs"),
 		doT = require("dot"),
+		cache = require("npm-svb-cache")(),
 		dotCache = {},
 		regex = {
-			url : /^(.*)\/(.*)\.(.*)|(.*)\/(.*)$/
+			url: /^(.*)\/(.*)\.(.*)|(.*)\/(.*)$/
 		},
 		root = 'public',
 		templateDir = 'templates',
@@ -42,10 +43,10 @@
 	 * @returns {*} A template when available
 	 */
 	function getTemplate(path, file) {
-		if(!dotCache[path]) {
+		if (!dotCache[path]) {
 			dotCache[path] = {
 				ctime: new Date(),
-				dots: doT.process({ path: './public/templates'.concat(path) })
+				dots: doT.process({path: './public/templates'.concat(path)})
 			};
 		}
 		return dotCache[path].dots[file];
@@ -57,7 +58,7 @@
 	 */
 	function getUrlData(url) {
 		var result;
-		if(regex.url.test(url)) {
+		if (regex.url.test(url)) {
 			result = regex.url.exec(url);
 			return {
 				extension: result[3] || 'html',
@@ -68,6 +69,8 @@
 	}
 
 	my_http.createServer(function (request, response) {
+		console.log(cache);
+
 		sys.puts('--> ' + (new Date()).getTime());
 
 		var my_path = url.parse(request.url).pathname,
@@ -75,46 +78,91 @@
 			template,
 			full_path = getFullPath(urlData);
 
-		filesys.exists(full_path, function (exists) {
-			if (!exists) {
-				template = getTemplate(urlData.path, urlData.file);
-				if(!template) {
-					response.writeHeader(404, {"Content-Type": "text/plain"});
-					response.write("404 Not Found\n");
-					response.end();
-				} else {
-					console.log('Displaying template');
+		function send404Response() {
+			response.writeHeader(404, {"Content-Type": "text/plain"});
+			response.write("404 Not Found\n");
+			response.end();
+		}
 
-					var content = template({
-						header: 'Hello my friends'
-					});
+		function send500Response(err) {
+			response.writeHeader(500, {"Content-Type": "text/plain"});
+			response.write(err + "\n");
+			response.end();
+		}
 
-					response.writeHeader(200);
-					response.write(content, "binary");
-					response.end();
+		function send200Response(content) {
+			response.writeHeader(200);
+			response.write(content, "binary");
+			response.end();
+		}
 
-					var fd = filesys.openSync(full_path, 'a');
-					filesys.writeSync(fd, content);
-					filesys.closeSync(fd);
-
-				}
+		function handleFileReaderResult(err, file) {
+			if(err) {
+				send500Response(err);
 			} else {
-				filesys.readFile(full_path, "binary", function (err, file) {
-					if (err) {
-						response.writeHeader(500, {"Content-Type": "text/plain"});
-						response.write(err + "\n");
-						response.end();
-					} else {
-						console.log('Displaying file');
-
-						response.writeHeader(200);
-						response.write(file, "binary");
-						response.end();
-					}
-
-				});
+				send200Response(file);
 			}
-		});
+		}
+
+		function handleTemplate() {
+			template = getTemplate(urlData.path, urlData.file);
+			if(!template) {
+				send404Response();
+			} else {
+				var content = template({
+					header: 'Hello my friends'
+				});
+
+				send200Response(content);
+				storeContent(content);
+			}
+		}
+
+		function loadResponse(fileCallback, templateCallback) {
+			filesys.exists(full_path, function (exists) {
+				if (exists) {
+					fileCallback();
+				} else {
+					templateCallback();
+				}
+			});
+		}
+
+		function storeContent(content) {
+			var fd = filesys.openSync(full_path, 'a');
+			filesys.writeSync(fd, content);
+			filesys.closeSync(fd);
+		}
+
+		loadResponse(function () {
+			filesys.readFile(full_path, "binary", handleFileReaderResult);
+		}, handleTemplate);
+
+		//filesys.exists(full_path, function (exists) {
+		//	if (!exists) {
+		//		template = getTemplate(urlData.path, urlData.file);
+		//		if(!template) {
+		//			send404Resonse();
+		//		} else {
+		//			console.log('Displaying template');
+		//
+		//			var content = template({
+		//				header: 'Hello my friends'
+		//			});
+		//
+		//			response.writeHeader(200);
+		//			response.write(content, "binary");
+		//			response.end();
+		//
+		//			var fd = filesys.openSync(full_path, 'a');
+		//			filesys.writeSync(fd, content);
+		//			filesys.closeSync(fd);
+		//
+		//		}
+		//	} else {
+		//		filesys.readFile(full_path, "binary", handleFileReaderResult);
+		//	}
+		//});
 
 		sys.puts('<-- ' + (new Date()).getTime());
 	}).listen(8080);
